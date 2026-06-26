@@ -13,4 +13,4 @@
 module load python3/3.13.2
 source .venv/bin/activate
 
-python main.py
+python -u main.py
