@@ -1,8 +1,11 @@
 import json
+import os
 import re
 import torch
 import gc
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 with open("Examples.json", "r") as f:
     examples = json.load(f)
@@ -44,16 +47,21 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=quantization_config,
 )
 
-BATCH_SIZE = 4
+BATCH_SIZE = 1  # Reduced from 4 to avoid CUDA OOM on 14.57 GiB GPU
+MAX_INPUT_LENGTH = 1024  # Truncate long few-shot prompts
 results = []
 
 for i in range(0, len(prompts), BATCH_SIZE):
     batch_prompts = prompts[i : i + BATCH_SIZE]
     batch_tasks = tasks[i : i + BATCH_SIZE]
 
-    inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True, truncation=True).to(
-        model.device
-    )
+    inputs = tokenizer(
+        batch_prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=MAX_INPUT_LENGTH,
+    ).to(model.device)
 
     with torch.no_grad():
         outputs = model.generate(**inputs, max_new_tokens=150, do_sample=False)
@@ -72,9 +80,10 @@ for i in range(0, len(prompts), BATCH_SIZE):
             }
         )
 
-    del inputs, outputs, generated_tokens
+    del inputs, outputs, generated_tokens, decoded_outputs
     gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
 with open("submission.json", "w") as f:
     json.dump(results, f, indent=4)
